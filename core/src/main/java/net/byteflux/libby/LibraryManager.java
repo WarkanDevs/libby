@@ -73,7 +73,7 @@ public abstract class LibraryManager {
     /**
      * Maven repositories used to resolve artifacts
      */
-    private final Set<String> repositories = new LinkedHashSet<>();
+    private final Set<Repository> repositories = new LinkedHashSet<>();
 
     /**
      * Lazily-initialized relocation helper that uses reflection to call into
@@ -178,8 +178,8 @@ public abstract class LibraryManager {
      *
      * @return current repositories
      */
-    public Collection<String> getRepositories() {
-        List<String> urls;
+    public Collection<Repository> getRepositories() {
+        List<Repository> urls;
         synchronized (repositories) {
             urls = new LinkedList<>(repositories);
         }
@@ -198,7 +198,16 @@ public abstract class LibraryManager {
     public void addRepository(String url) {
         String repo = requireNonNull(url, "url").endsWith("/") ? url : url + '/';
         synchronized (repositories) {
-            repositories.add(repo);
+            repositories.add(new Repository(repo, null, null));
+        }
+    }
+
+    public void addRepository(String url, String basicHTTPAuthUser, String basicHTTPAuthPassword) {
+        String repo = requireNonNull(url, "url").endsWith("/") ? url : url + '/';
+        requireNonNull(basicHTTPAuthUser, "basicHTTPAuthUser");
+        requireNonNull(basicHTTPAuthUser, "basicHTTPAuthPassword");
+        synchronized (repositories) {
+            repositories.add(new Repository(repo, basicHTTPAuthUser, basicHTTPAuthPassword));
         }
     }
 
@@ -245,32 +254,40 @@ public abstract class LibraryManager {
      * @param library the library to resolve
      * @return download URLs
      */
-    public Collection<String> resolveLibrary(Library library) {
-        Set<String> urls = new LinkedHashSet<>(requireNonNull(library, "library").getUrls());
+    public Collection<Repository> resolveLibrary(Library library) {
+        Set<Repository> repositoriesResolved = new LinkedHashSet<>(requireNonNull(library, "library").getUrls());
         boolean snapshot = library.isSnapshot();
 
         // Try from library-declared repos first
-        for (String repository : library.getRepositories()) {
+        for (Repository repository : library.getRepositories()) {
             if (snapshot) {
                 String url = resolveSnapshot(repository, library);
                 if (url != null)
-                    urls.add(repository + url);
+                    repositoriesResolved.add(
+                        new Repository(repository.getURL() + url, repository.getBasicHTTPAuthUser(), repository.getBasicHTTPAuthPassword())
+                    );
             } else {
-                urls.add(repository + library.getPath());
+                repositoriesResolved.add(
+                    new Repository(repository.getURL() + library.getPath(), repository.getBasicHTTPAuthUser(), repository.getBasicHTTPAuthPassword())
+                );
             }
         }
 
-        for (String repository : getRepositories()) {
+        for (Repository repository : getRepositories()) {
             if (snapshot) {
                 String url = resolveSnapshot(repository, library);
                 if (url != null)
-                    urls.add(repository + url);
+                    repositoriesResolved.add(
+                        new Repository(repository.getURL() + url, repository.getBasicHTTPAuthUser(), repository.getBasicHTTPAuthPassword())
+                    );
             } else {
-                urls.add(repository + library.getPath());
+                repositoriesResolved.add(
+                    new Repository(repository.getURL() + library.getPath(), repository.getBasicHTTPAuthUser(), repository.getBasicHTTPAuthPassword())
+                );
             }
         }
 
-        return Collections.unmodifiableSet(urls);
+        return Collections.unmodifiableSet(repositoriesResolved);
     }
 
     /**
@@ -281,10 +298,11 @@ public abstract class LibraryManager {
      * @return The URl of the artifact of a snapshot library or null if no information could be gathered from the
      *         provided repository
      */
-    private String resolveSnapshot(String repository, Library library) {
-        String url = requireNonNull(repository, "repository") + requireNonNull(library, "library").getPartialPath() + "maven-metadata.xml";
+    private String resolveSnapshot(Repository repository, Library library) {
+        String url = requireNonNull(repository, "repository").getURL() + requireNonNull(library, "library").getPartialPath() + "maven-metadata.xml";
         try {
             URLConnection connection = new URL(requireNonNull(url, "url")).openConnection();
+            repository.configureURLConnection(connection);
 
             connection.setConnectTimeout(5000);
             connection.setReadTimeout(5000);
@@ -389,9 +407,10 @@ public abstract class LibraryManager {
      * @param url the URL to the library jar
      * @return downloaded jar as byte array or null if nothing was downloaded
      */
-    private byte[] downloadLibrary(String url) {
+    private byte[] downloadLibrary(Repository repository) {
         try {
-            URLConnection connection = new URL(requireNonNull(url, "url")).openConnection();
+            URLConnection connection = new URL(requireNonNull(repository.getURL(), "url")).openConnection();
+            repository.configureURLConnection(connection);
 
             connection.setConnectTimeout(5000);
             connection.setReadTimeout(5000);
@@ -418,11 +437,11 @@ public abstract class LibraryManager {
             throw new IllegalArgumentException(e);
         } catch (IOException e) {
             if (e instanceof FileNotFoundException) {
-                logger.debug("File not found: " + url);
+                logger.debug("File not found: " + repository.getURL());
             } else if (e instanceof SocketTimeoutException) {
-                logger.debug("Connect timed out: " + url);
+                logger.debug("Connect timed out: " + repository.getURL());
             } else if (e instanceof UnknownHostException) {
-                logger.debug("Unknown host: " + url);
+                logger.debug("Unknown host: " + repository.getURL());
             } else {
                 logger.debug("Unexpected IOException", e);
             }
@@ -470,8 +489,8 @@ public abstract class LibraryManager {
             }
         }
 
-        Collection<String> urls = resolveLibrary(library);
-        if (urls.isEmpty()) {
+        Collection<Repository> repositories = resolveLibrary(library);
+        if (repositories.isEmpty()) {
             throw new RuntimeException("Library '" + library + "' couldn't be resolved, add a repository");
         }
 
@@ -490,8 +509,8 @@ public abstract class LibraryManager {
         try {
             Files.createDirectories(file.getParent());
 
-            for (String url : urls) {
-                byte[] bytes = downloadLibrary(url);
+            for (Repository repository : repositories) {
+                byte[] bytes = downloadLibrary(repository);
                 if (bytes == null) {
                     continue;
                 }
@@ -501,7 +520,7 @@ public abstract class LibraryManager {
                     if (!Arrays.equals(checksum, library.getChecksum())) {
                         logger.warn("*** INVALID CHECKSUM ***");
                         logger.warn(" Library :  " + library);
-                        logger.warn(" URL :  " + url);
+                        logger.warn(" URL :  " + repository);
                         logger.warn(" Expected :  " + Base64.getEncoder().encodeToString(library.getChecksum()));
                         logger.warn(" Actual :  " + Base64.getEncoder().encodeToString(checksum));
                         continue;

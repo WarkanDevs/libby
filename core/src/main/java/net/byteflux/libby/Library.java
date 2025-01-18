@@ -20,12 +20,12 @@ public class Library {
     /**
      * Direct download URLs for this library
      */
-    private final Collection<String> urls;
+    private final Collection<Repository> urls;
 
     /**
      * Repository URLs for this library
      */
-    private final Collection<String> repositories;
+    private final Collection<Repository> repositories;
 
     /**
      * Library id (used by Isolated Class Loaders)
@@ -95,7 +95,7 @@ public class Library {
      * @param relocations  jar relocations or null
      * @param isolatedLoad isolated load for this library
      */
-    private Library(Collection<String> urls,
+    private Library(Collection<Repository> urls,
                     String id,
                     String groupId,
                     String artifactId,
@@ -122,8 +122,8 @@ public class Library {
      * @param relocations  jar relocations or null
      * @param isolatedLoad isolated load for this library
      */
-    private Library(Collection<String> urls,
-                    Collection<String> repositories,
+    private Library(Collection<Repository> urls,
+                    Collection<Repository> repositories,
                     String id,
                     String groupId,
                     String artifactId,
@@ -160,7 +160,7 @@ public class Library {
      *
      * @return direct download URLs
      */
-    public Collection<String> getUrls() {
+    public Collection<Repository> getUrls() {
         return urls;
     }
 
@@ -169,7 +169,7 @@ public class Library {
      *
      * @return repositories URLs
      */
-    public Collection<String> getRepositories() {
+    public Collection<Repository> getRepositories() {
         return repositories;
     }
 
@@ -341,12 +341,12 @@ public class Library {
         /**
          * Direct download URLs for this library
          */
-        private final Collection<String> urls = new LinkedList<>();
+        private final Collection<Repository> urls = new LinkedList<>();
 
         /**
          * Repository URLs for this library
          */
-        private final Collection<String> repositories = new LinkedList<>();
+        private final Collection<Repository> repositories = new LinkedList<>();
 
         /**
          * The library ID
@@ -395,7 +395,12 @@ public class Library {
          * @return this builder
          */
         public Builder url(String url) {
-            urls.add(requireNonNull(url, "url"));
+            urls.add(new Repository(requireNonNull(url, "url"), null, null));
+            return this;
+        }
+
+        public Builder url(String url, String httpBasicAuthUser, String httpBasicAuthPassword) {
+            urls.add(new Repository(requireNonNull(url, "url"), httpBasicAuthUser, httpBasicAuthPassword));
             return this;
         }
 
@@ -408,7 +413,12 @@ public class Library {
          * @return this builder
          */
         public Builder repository(String url) {
-            repositories.add(requireNonNull(url, "repository").endsWith("/") ? url : url + '/');
+            repositories.add(new Repository(requireNonNull(url, "repository").endsWith("/") ? url : url + '/', null, null));
+            return this;
+        }
+
+        public Builder repository(String url, String httpBasicAuthUser, String httpBasicAuthPassword) {
+            repositories.add(new Repository(requireNonNull(url, "repository").endsWith("/") ? url : url + '/', httpBasicAuthUser, httpBasicAuthPassword));
             return this;
         }
 
